@@ -1,14 +1,15 @@
 import torch
 import numpy as np
-from silero_vad import read_audio,get_speech_timestamps,load_silero_vad,VADIterator
-vad_model = load_silero_vad()
+from models.enhancer import Enhance_Audio
+from models.stt import Transcribe
+from models.vad import vad_iterator
 
 
 # 🎤 Microphone
 #       ↓
 #   small audio chunk
 #       ↓
-#     Silero VAD
+#     Silero VAD (need to check intra turn pause where user take just a pause to think)
 #       │
 #       ├── NO SPEECH → discard / don't send to STT
 #       │
@@ -22,9 +23,7 @@ vad_model = load_silero_vad()
 
 SAMPLE_RATE=16000
 CHANNELS=1
-CHUNKSIZE=512
-
-vad_iterator = VADIterator(model=vad_model,threshold=0.5,sampling_rate=16000,min_silence_duration_ms=400,speech_pad_ms=30)
+CHUNKSIZE= 512
 
 speech_audio=[]
 is_speaking=False
@@ -41,12 +40,14 @@ def Detect_Speech_And_Process_Audio(audio):
         is_speaking=True
 
         print("🎤 Speech started")
+        print(speech_event)
 
         speech_audio=[]
         speech_audio.append(audio)
         return None
 
     elif is_speaking:
+       # print("🔵 still speaking.....")
         speech_audio.append(audio)
 
     if speech_event and "end" in speech_event:
