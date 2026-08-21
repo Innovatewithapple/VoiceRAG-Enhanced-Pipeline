@@ -8,7 +8,7 @@ tts_pipeline.load_voice("af_bella")
 tts_pipeline.load_voice("am_michael")
 
 def Generate_Speech(text,voice):
-    generator = tts_pipeline(text=text,voice=voice,speed=0.7)
+    generator = tts_pipeline(text=text,voice=voice,speed=0.9)
     audio_segments = []
 
     for _,_,audio in generator:

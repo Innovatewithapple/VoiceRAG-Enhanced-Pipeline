@@ -1,79 +1,104 @@
-from Audio_Detection import Detect_Speech_And_Process_Audio,SAMPLE_RATE,CHANNELS,CHUNKSIZE
+from Audio_Detection import (Detect_Speech_And_Process_Audio,SAMPLE_RATE,CHANNELS,CHUNKSIZE)
 import sounddevice as sd
-import numpy as np
-from models.stt import Transcribe
-from models.enhancer import Enhance_Audio,Initialize_Enhancer
 import queue
 import threading
+from models.nemotron import NemotronStreamer
 from rag.generation import Generate_Reply
 from models.tts import Generate_Speech
+import sounddevice as sd
+import numpy as np
 
-SILENCE_THRESHOLD = 0.001
 
-silence_start = None
-in_silence = False
+# =========================================================
+# MICROPHONE QUEUE
+# =========================================================
 
 audio_queue = queue.Queue()
 
-def audio_callback(indata, frames, time, status):
+# =========================================================
+# MICROPHONE CALLBACK
+# =========================================================
 
+def audio_callback(indata,frames,time,status):
     if status:
-        print("STATUS:", status)
+        print("STATUS:",status,flush=True)
 
-    # Get microphone audio
     audio = indata[:, 0].copy()
-
-    # Put audio chunk into queue
     audio_queue.put(audio)
 
-def audio_worker():
 
-    Initialize_Enhancer()
+def audio_worker():
+    nemotron = NemotronStreamer()
+    nemotron.start()
+
+    print("🎤 VAD + Nemotron ready",flush=True)
+    print("=" * 50)
+
+    # -----------------------------------------------------
+    # Continuous audio loop
+    # -----------------------------------------------------
 
     while True:
-
         audio = audio_queue.get()
+        utterance = (Detect_Speech_And_Process_Audio(audio))
 
-        utterance = Detect_Speech_And_Process_Audio(audio)
+        # =================================================
+        # Nemotron receives audio continuously
+        # =================================================
+
+        nemotron.add_audio(audio) 
 
         if utterance is not None:
 
-            print("✅ Complete audio ready")
-            print("=" * 50)
-            print("\n")
-            print("🎤 Listening.......")
-            # Enhance THIS speech chunk
-            # enhanced_audio = Enhance_Audio(utterance)
-            
-            # Transcribe THIS speech chunk
-            stt = Transcribe(utterance)
-            
-            print(f"Whisper: {stt}")
-            answer = Generate_Reply(query=stt,top_k=10)
-            print("="*50)
-            print("Answer: ",answer)
+            print("\n🛑 VAD detected end of utterance",flush=True)
+            final_query = (nemotron.finish_utterance())
 
-            if answer is not None:
-                tts = Generate_Speech(text=answer,voice='af_bella')
+            if final_query:
 
-                sd.play(data=tts,samplerate=24000)
-                sd.wait()
+                print("\n🎯 FINAL QUERY:",final_query,flush=True)
+
+                print("=" * 50)
+
+                # =================================================
+                # QUERY → RAG
+                # =================================================
+
+                answer = Generate_Reply(query=final_query,top_k=10)
+
+                print("\n🤖 Answer:",answer,flush=True)
+                if answer is not None:
+                    tts = Generate_Speech(text=answer,voice='af_bella')
+
+                    sd.play(data=tts,samplerate=24000)
+                    sd.wait()
+
+            else:
+                print("⚠️ No final transcript received",flush=True)
+
+            # ------------------------------------------------
+            # Reset Nemotron for next query
+            # ------------------------------------------------
+
+            nemotron.reset_transcript()
+
+            print("\n🎤 Listening.......",flush=True)
 
 # ==========================================
 # BELLA GREETING
 # ==========================================
 
 greeting = Generate_Speech(
-    text="Hi, I'm Bella from VisaFlow. How may I help you?",
+    text="Hi, I'm Edith from VisaFlow. How may I help you?",
     voice="af_bella"
 )
 
 sd.play(greeting,samplerate=24000)
 sd.wait()
 
-# ==========================================
-# START MICROPHONE
-# ==========================================
+# =========================================================
+# START WORKER
+# =========================================================
+
 worker = threading.Thread(
     target=audio_worker,
     daemon=True
@@ -81,12 +106,33 @@ worker = threading.Thread(
 
 worker.start()
 
+
+# =========================================================
+# START MICROPHONE
+# =========================================================
+
 try:
 
-    with sd.InputStream(samplerate=SAMPLE_RATE,channels=CHANNELS,dtype="float32",blocksize=CHUNKSIZE,callback=audio_callback):
-        print("🎤 Listening.......")
+    with sd.InputStream(
+        samplerate=SAMPLE_RATE,
+        channels=CHANNELS,
+        dtype="float32",
+        blocksize=CHUNKSIZE,
+        callback=audio_callback,
+    ):
+
+        print(
+            "🎤 Listening.......",
+            flush=True
+        )
+
         while True:
+
             sd.sleep(1000)
 
 except KeyboardInterrupt:
-    print("\n🛑 Microphone stopped.")
+
+    print(
+        "\n🛑 Microphone stopped.",
+        flush=True
+    )
