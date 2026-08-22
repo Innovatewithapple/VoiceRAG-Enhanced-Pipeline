@@ -6,6 +6,8 @@ tts_pipeline = KPipeline(lang_code='a')
 
 tts_pipeline.load_voice("af_bella")
 tts_pipeline.load_voice("am_michael")
+tts_pipeline.load_voice("af_sky")
+tts_pipeline.load_voice("af_sarah")
 
 def Generate_Speech(text,voice):
     generator = tts_pipeline(text=text,voice=voice,speed=0.9)

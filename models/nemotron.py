@@ -18,11 +18,9 @@ CHANNELS = 1
 
 # We already tested this successfully.
 CHUNK_MS = 160
-
 CHUNK_SAMPLES = int(
     SAMPLE_RATE * CHUNK_MS / 1000
 )
-
 
 # =========================================================
 # NEMOTRON STREAMER
@@ -75,7 +73,7 @@ class NemotronStreamer:
                     "channels": CHANNELS,
                 }
             })
-        )
+        ) 
 
         # -------------------------------------------------
         # Receiver
@@ -101,10 +99,8 @@ class NemotronStreamer:
 
         self.connected.set()
 
-        print(
-            f"🟢 Nemotron streaming worker started "
-            f"({CHUNK_MS} ms chunks)"
-        )
+        print(f"🟢 Nemotron streaming worker started "
+            f"({CHUNK_MS} ms chunks)")
 
     # =====================================================
     # RECEIVE SERVER EVENTS
@@ -126,32 +122,21 @@ class NemotronStreamer:
 
                 data = json.loads(message)
 
-                event_type = data.get(
-                    "type",
-                    ""
-                )
+                event_type = data.get("type","")
 
                 # =========================================
                 # SESSION CREATED
                 # =========================================
 
                 if event_type == "session.created":
-
-                    print(
-                        "🟢 NeMo realtime session created",
-                        flush=True
-                    )
+                    print("🟢 NeMo realtime session created",flush=True)
 
                 # =========================================
                 # SESSION UPDATED
                 # =========================================
 
                 elif event_type == "session.updated":
-
-                    print(
-                        "🟢 Session configured",
-                        flush=True
-                    )
+                    print("🟢 Session configured",flush=True)
 
                 # =========================================
                 # PARTIAL TRANSCRIPT
@@ -169,12 +154,7 @@ class NemotronStreamer:
                     )
 
                     if text:
-
-                        print(
-                            text,
-                            end="",
-                            flush=True
-                        )
+                        print(text,end="",flush=True)
 
                 # =========================================
                 # FINAL TRANSCRIPT
@@ -195,9 +175,7 @@ class NemotronStreamer:
 
                         with self.lock:
 
-                            self.final_transcript = (
-                                text.strip()
-                            )
+                            self.final_transcript = (text.strip())
 
                         print(
                             f"\n✅ Final: "
@@ -221,27 +199,15 @@ class NemotronStreamer:
                 # SPEECH END
                 # =========================================
 
-                elif (
-                    event_type
-                    == "input_audio_buffer.speech_stopped"
-                ):
-
-                    print(
-                        "\n🔇 Nemotron speech ended",
-                        flush=True
-                    )
+                elif event_type == "input_audio_buffer.speech_stopped":
+                    print("\n🔇 Nemotron speech ended",flush=True)
 
                 # =========================================
                 # ERROR
                 # =========================================
 
                 elif event_type == "error":
-
-                    print(
-                        "\n❌ Nemotron error:",
-                        data,
-                        flush=True
-                    )
+                    print("\n❌ Nemotron error:",data,flush=True)
 
                     self.final_event.set()
 
