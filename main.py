@@ -364,7 +364,9 @@ def audio_worker():
                 retrieval_start = time.perf_counter()
 
                 top_chunk = Retrieve_Remote(final_query)
-
+                print("*"*50)
+                print(f"Recieved Chunk: {top_chunk}")
+                print("*"*50)
                 retrieval_time = (
                     time.perf_counter()
                     - retrieval_start
@@ -401,6 +403,7 @@ def audio_worker():
                     # =================================================
 
                     llm_start = time.perf_counter()
+                    
 
                     answer = Stream_LLM_To_TTS(
                         query=final_query,
@@ -443,7 +446,7 @@ def audio_worker():
 # ==========================================
 
 greeting = Generate_Speech(
-    text="Hi, I'm Edith from VisaFlow. How may I help you?",
+    text=" Hi, I'm Edith from VisaFlow. How may I help you?",
     voice="af_sky"
 )
 

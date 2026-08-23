@@ -14,7 +14,7 @@ def Retrieve_Remote(query, timeout=30):
         )
 
         response.raise_for_status()
-
+        
         return response.json()
 
     except requests.exceptions.Timeout:

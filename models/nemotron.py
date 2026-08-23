@@ -175,17 +175,19 @@ class NemotronStreamer:
 
                         with self.lock:
 
-                            self.final_transcript = (text.strip())
+                            if self.final_transcript:
+                                self.final_transcript += " " + text.strip()
+                            else:
+                                self.final_transcript = text.strip()
 
                         print(
-                            f"\n✅ Final: "
-                            f"{self.final_transcript}",
+                            f"\n✅ Final: {text.strip()}",
                             flush=True
                         )
 
-                    # Tell finish_utterance()
-                    # that Nemotron has finished.
+                    # Nemotron has completed this transcription event
                     self.final_event.set()
+
 
                 # =========================================
                 # SPEECH START
