@@ -1,288 +1,14 @@
 from Audio_Detection import (Detect_Speech_And_Process_Audio,SAMPLE_RATE,CHANNELS,CHUNKSIZE)
 import sounddevice as sd
-import queue
 import threading
 from models.nemotron import NemotronStreamer
-# from rag.generation import Generate_Reply
 from models.tts import Generate_Speech
-import sounddevice as sd
-import numpy as np
 from rag.remote_retrieval import Retrieve_Remote
-from models.llm import Generate_LLM_Response, Stream_LLM_To_TTS
+from models.llm import Stream_LLM_To_TTS
 import time
-from Evaluation.Timestamps import log_query
+from audio.audio_state import audio_queue,tts_queue,query_metrics,conversation_history
+from audio.audio_workers import tts_worker,playback_worker
 
-
-# =========================================================
-# MICROPHONE QUEUE
-# =========================================================
-
-audio_queue = queue.Queue()              # microphone
-tts_queue = queue.Queue()                # text → Kokoro
-tts_audio_queue = queue.Queue()          # Kokoro → speaker
-query_metrics = {}
-
-def get_silence_duration(audio, threshold=0.005):
-
-    audio = np.asarray(audio)
-
-    if audio.ndim > 1:
-        audio = audio[:, 0]
-
-    active = np.where(
-        np.abs(audio) > threshold
-    )[0]
-
-    if len(active) == 0:
-        return (
-            len(audio) / 24000,
-            len(audio) / 24000
-        )
-
-    start = active[0]
-    end = active[-1]
-
-    leading = start / 24000
-    trailing = (len(audio) - end - 1) / 24000
-
-    return leading, trailing
-
-
-def trim_silence(
-    audio,
-    threshold=0.005,
-    keep_trailing=0.38
-):
-
-    audio = np.asarray(
-        audio,
-        dtype=np.float32
-    )
-
-    if audio.ndim > 1:
-        audio = audio[:, 0]
-
-    active = np.where(
-        np.abs(audio) > threshold
-    )[0]
-
-    if len(active) == 0:
-        return None
-
-    start = active[0]
-    end = active[-1] + 1
-
-    # Keep a small amount of trailing silence
-    keep_samples = int(
-        keep_trailing * 24000
-    )
-
-    end = min(
-        end + keep_samples,
-        len(audio)
-    )
-
-    return audio[start:end]
-
-def tts_worker():
-
-    while True:
-
-        sentence = tts_queue.get()
-
-        if sentence is None:
-            # Tell playback that this query is finished
-            tts_audio_queue.put(None)
-            tts_queue.task_done()
-            break
-
-        print(
-            f"\n🔊 Speaking: {sentence}",
-            flush=True
-        )
-
-        tts_start = time.perf_counter()
-
-        audio = Generate_Speech(
-            text=sentence,
-            voice="af_sky"
-        )
-
-        tts_time = (
-            time.perf_counter() - tts_start
-        )
-        query_metrics["tts_generation_total"] += tts_time
-
-        print(
-            f"🔊 TTS generation: "
-            f"{tts_time:.3f}s",
-            flush=True
-        )
-
-        # -----------------------------------------
-        # Measure original silence
-        # -----------------------------------------
-
-        leading, trailing = get_silence_duration(audio)
-
-        print(
-            f"🎧 Before trim: "
-            f"{len(audio) / 24000:.3f}s | "
-            f"leading: {leading:.3f}s | "
-            f"trailing: {trailing:.3f}s",
-            flush=True
-        )
-
-        # -----------------------------------------
-        # Remove leading/trailing silence
-        # -----------------------------------------
-
-        audio = trim_silence(audio)
-
-        if audio is None:
-            print(
-                "⚠️ Skipping silent audio",
-                flush=True
-            )
-
-        else:
-            print(
-                f"🎧 After trim: "
-                f"{len(audio) / 24000:.3f}s",
-                flush=True
-            )
-            audio_duration = len(audio) / 24000
-            query_metrics["audio_duration"] += audio_duration
-
-            tts_audio_queue.put(audio)
-
-        tts_queue.task_done()
-
-def playback_worker():
-
-    print(
-        "🔊 Audio playback stream starting...",
-        flush=True
-    )
-
-    with sd.OutputStream(
-        samplerate=24000,
-        channels=1,
-        dtype="float32"
-    ) as stream:
-
-        print(
-            "🟢 Audio playback stream ready",
-            flush=True
-        )
-
-        while True:
-
-            audio = tts_audio_queue.get()
-
-            if audio is None:
-                query_metrics["last_audio_finished"] = time.perf_counter()
-                response_total = (query_metrics["last_audio_finished"] - query_metrics["query_start"])
-                print("\n" + "=" * 50, flush=True)
-                print(
-                    f"📊 RESPONSE METRICS",
-                    flush=True
-                )
-
-                print(
-                    f"⚡ Retrieval: "
-                    f"{query_metrics['retrieval_time']:.3f}s",
-                    flush=True
-                )
-
-                print(
-                    f"🤖 LLM: "
-                    f"{query_metrics['llm_time']:.3f}s",
-                    flush=True
-                )
-
-                print(
-                    f"🚀 TTFA: "
-                    f"{query_metrics['first_audio_started'] - query_metrics['query_start']:.3f}s",
-                    flush=True
-                )
-
-                print(
-                    f"🔊 TTS compute: "
-                    f"{query_metrics['tts_generation_total']:.3f}s",
-                    flush=True
-                )
-
-                print(
-                    f"🎧 Audio duration: "
-                    f"{query_metrics['audio_duration']:.3f}s",
-                    flush=True
-                )
-
-                print(
-                    f"⏱️ Response complete: "
-                    f"{response_total:.3f}s",
-                    flush=True
-                )
-
-                print("=" * 50, flush=True)
-                tts_audio_queue.task_done()
-                break
-
-            print(
-                "🔊 Playing audio...",
-                flush=True
-            )
-
-            playback_start = time.perf_counter()
-
-            # Make sure audio is float32
-            audio = np.asarray(
-                audio,
-                dtype=np.float32
-            )
-
-            # Make mono audio shape:
-            # (samples,) → (samples, 1)
-            if audio.ndim == 1:
-                audio = audio.reshape(-1, 1)
-
-            if query_metrics["first_audio_started"] is None:
-
-                query_metrics["first_audio_started"] = (
-                    time.perf_counter()
-                )
-
-                ttfa = (
-                    query_metrics["first_audio_started"]
-                    - query_metrics["query_start"]
-                )
-
-                print(
-                    f"🚀 TTFA: {ttfa:.3f} seconds",
-                    flush=True
-                )
-            # Write directly into the persistent
-            # audio output stream
-            stream.write(audio)
-
-            playback_time = (
-                time.perf_counter()
-                - playback_start
-            )
-
-            print(
-                f"📡 Playback: "
-                f"{playback_time:.3f}s",
-                flush=True
-            )
-
-            tts_audio_queue.task_done()
-
-    print(
-        "🛑 Audio playback stream stopped",
-        flush=True
-    )
 # =========================================================
 # MICROPHONE CALLBACK
 # =========================================================
@@ -408,8 +134,18 @@ def audio_worker():
                     answer = Stream_LLM_To_TTS(
                         query=final_query,
                         context=top_chunk,
-                        tts_queue=tts_queue
+                        tts_queue=tts_queue,
+                        conversation_history=conversation_history
                     )
+                    conversation_history.append({
+                        "role": "user",
+                        "content": final_query
+                    })
+
+                    conversation_history.append({
+                        "role": "assistant",
+                        "content": answer
+                    })
 
                     llm_time = (
                         time.perf_counter()
@@ -446,7 +182,7 @@ def audio_worker():
 # ==========================================
 
 greeting = Generate_Speech(
-    text=" Hi, I'm Edith from VisaFlow. How may I help you?",
+    text=" Hi, I'm Sasha from VisaFlow. How may I help you?",
     voice="af_sky"
 )
 

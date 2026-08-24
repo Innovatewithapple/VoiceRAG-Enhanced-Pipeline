@@ -37,13 +37,19 @@ def Generate_LLM_Response(query,context):
     # return full_response.strip()
 
 
-def Stream_LLM_To_TTS(query, context, tts_queue):
+def Stream_LLM_To_TTS(query, context, tts_queue,conversation_history):
 
     prompt = Customer_Support_Agent_Prompt(
         query=query,
         context=context,
-        source="terms and policy"
+        source="terms and policy",
+        conversation_history=conversation_history
     )
+
+    print("="*50)
+    print("Conversation_History: ")
+    print(conversation_history)
+    print("="*50)
 
     response = client.chat.completions.create(
         model=MODEL_NAME,
@@ -56,7 +62,23 @@ def Stream_LLM_To_TTS(query, context, tts_queue):
     full_response = ""
     buffer = ""
 
+    # =========================================
+    # CHUNKING SETTINGS
+    # =========================================
+
     MAX_WORDS = 15
+
+    # Strong sentence punctuation:
+    # . ? !
+    MIN_SENTENCE_WORDS = 4
+
+    # Weaker punctuation:
+    # ,
+    MIN_COMMA_WORDS = 8
+
+    # =========================================
+    # STREAM LLM
+    # =========================================
 
     for chunk in response:
 
@@ -68,77 +90,188 @@ def Stream_LLM_To_TTS(query, context, tts_queue):
         if not text:
             continue
 
+        # -----------------------------------------
         # Show LLM response live
-        print(text,end="",flush=True)
+        # -----------------------------------------
+
+        print(
+            text,
+            end="",
+            flush=True
+        )
 
         full_response += text
         buffer += text
 
-        # -----------------------------------------
-        # Check whether enough text is ready
-        # -----------------------------------------
+        # =========================================
+        # PROCESS BUFFER
+        # =========================================
 
         while True:
 
-            # -----------------------------------------
-            # Check punctuation
-            # -----------------------------------------
+            buffer = buffer.lstrip()
 
-            positions = [
-                buffer.find(","),
+            if not buffer:
+                break
+
+            # =====================================
+            # FIND SENTENCE PUNCTUATION
+            # =====================================
+
+            sentence_positions = [
                 buffer.find("."),
                 buffer.find("?"),
                 buffer.find("!")
             ]
 
-            positions = [
-                p for p in positions
+            sentence_positions = [
+                p for p in sentence_positions
                 if p != -1
             ]
 
-            # -----------------------------------------
-            # Punctuation found BEFORE 12 words
-            # -----------------------------------------
+            # =====================================
+            # SENTENCE BOUNDARY
+            # =====================================
 
-            if positions:
+            if sentence_positions:
 
-                end = min(positions)
+                end = min(sentence_positions)
 
-                speech_text = (buffer[:end + 1].strip())
+                candidate = (
+                    buffer[:end + 1]
+                    .strip()
+                )
 
-                buffer = (buffer[end + 1:].strip())
+                candidate_words = candidate.split()
 
-                if speech_text:
-                    tts_queue.put(speech_text)
+                # ---------------------------------
+                # Only split if sentence is
+                # reasonably large.
+                # ---------------------------------
 
-                continue
+                if len(candidate_words) >= MIN_SENTENCE_WORDS:
 
-            # -----------------------------------------
-            # Check word limit FIRST
-            # -----------------------------------------
+                    tts_queue.put(candidate)
+
+                    buffer = (
+                        buffer[end + 1:]
+                        .lstrip()
+                    )
+
+                    continue
+
+            # =====================================
+            # FIND COMMA
+            # =====================================
+
+            comma_position = buffer.find(",")
+
+            if comma_position != -1:
+
+                candidate = (
+                    buffer[:comma_position + 1]
+                    .strip()
+                )
+
+                candidate_words = candidate.split()
+
+                # ---------------------------------
+                # Comma is a weaker boundary.
+                # Only use it when we already
+                # have enough words.
+                # ---------------------------------
+
+                if len(candidate_words) >= MIN_COMMA_WORDS:
+
+                    tts_queue.put(candidate)
+
+                    buffer = (
+                        buffer[comma_position + 1:]
+                        .lstrip()
+                    )
+
+                    continue
+
+            # =====================================
+            # MAX WORD LIMIT
+            # =====================================
 
             words = buffer.split()
 
             if len(words) >= MAX_WORDS:
-                speech_text = " ".join(words[:MAX_WORDS])
-                buffer = " ".join(words[MAX_WORDS:])
-                tts_queue.put(speech_text)
 
-                continue            
+                # ---------------------------------
+                # Take first 15 words.
+                # ---------------------------------
 
-            # -----------------------------------------
-            # Nothing ready yet
-            # -----------------------------------------
+                speech_words = words[:MAX_WORDS]
+
+                speech_text = " ".join(
+                    speech_words
+                )
+
+                # ---------------------------------
+                # Remove those words from buffer.
+                # ---------------------------------
+
+                remaining_words = words[MAX_WORDS:]
+
+                buffer = " ".join(
+                    remaining_words
+                )
+
+                # ---------------------------------
+                # If punctuation belongs directly
+                # to the 15th word, keep it with
+                # the current chunk.
+                #
+                # Example:
+                #
+                # "application, the..."
+                #
+                # becomes:
+                #
+                # "application,"
+                #
+                # rather than leaving "," behind.
+                # ---------------------------------
+
+                if remaining_words:
+
+                    # Nothing else required here because
+                    # split() keeps punctuation attached
+                    # to its word.
+
+                    pass
+
+                if speech_text:
+
+                    tts_queue.put(
+                        speech_text
+                    )
+
+                continue
+
+            # =====================================
+            # NOTHING READY YET
+            # =====================================
 
             break
 
-    # ---------------------------------------------
-    # Flush whatever remains
-    # ---------------------------------------------
+    # =============================================
+    # FLUSH REMAINING TEXT
+    # =============================================
 
     if buffer.strip():
-        tts_queue.put(buffer.strip())
 
-    # Tell TTS worker that this LLM response is finished
+        tts_queue.put(
+            buffer.strip()
+        )
+
+    # =============================================
+    # TELL TTS WORKER THIS RESPONSE IS FINISHED
+    # =============================================
+
     tts_queue.put(None)
+
     return full_response.strip()
