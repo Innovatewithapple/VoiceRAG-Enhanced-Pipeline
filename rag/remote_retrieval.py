@@ -1,7 +1,7 @@
 import requests
 # We will replace this with the actual
 # Colab/ngrok URL once the Colab server is running.
-COLAB_URL = "https://absentee-mulled-stadium.ngrok-free.dev"
+COLAB_URL = "https://plethora-registry-shrine.ngrok-free.dev"
 
 def Retrieve_Remote(query, timeout=30):
     try:
