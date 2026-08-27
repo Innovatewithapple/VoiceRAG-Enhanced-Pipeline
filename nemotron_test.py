@@ -1,63 +1,86 @@
-import torch
-
-from transformers import AutoProcessor, AutoModelForRNNT
-from transformers.audio_utils import load_audio
-
-
-MODEL_ID = "nvidia/nemotron-speech-streaming-en-0.6b"
+import asyncio
+import time
+import json
+import websockets
 
 
-print("Loading processor...")
-
-processor = AutoProcessor.from_pretrained(
-    MODEL_ID
-)
-
-print("Loading model...")
-
-model = AutoModelForRNNT.from_pretrained(
-    MODEL_ID
-)
-
-print("✅ Model loaded")
-
-print(
-    "Sample rate:",
-    processor.feature_extractor.sampling_rate
+COLAB_WS_URL = (
+    "wss://plethora-registry-shrine.ngrok-free.dev/ws"
 )
 
 
-audio = load_audio(
-    "/Users/himanshuvyas/VOICERAG/noisy.mp3",
-    sampling_rate=processor.feature_extractor.sampling_rate
-)
+async def test_websocket():
 
-print(
-    "Audio duration:",
-    len(audio) /
-    processor.feature_extractor.sampling_rate,
-    "seconds"
-)
+    async with websockets.connect(
+        COLAB_WS_URL,
+        ping_interval=20,
+        ping_timeout=20
+    ) as websocket:
 
-inputs = processor(
-    audio,
-    sampling_rate=processor.feature_extractor.sampling_rate
-)
+        print("🟢 WebSocket connected\n")
 
-inputs = inputs.to(
-    model.device,
-    dtype=model.dtype
-)
+        queries = [
+            "What is the refund policy?",
+            "Hi, i m mihir and i have a query regarding cancellation and i want to know Why can my application be cancelled?",
+            "How long does the application take?",
+            "What documents do I need?",
+            "Can I cancel my application?"
+        ]
 
-output = model.generate(
-    **inputs,
-    return_dict_in_generate=True
-)
+        for i, query in enumerate(queries):
 
-text = processor.decode(
-    output.sequences,
-    skip_special_tokens=True
-)
+            start = time.perf_counter()
 
-print("📝 Transcription:")
-print(text)
+            await websocket.send(
+                json.dumps({
+                    "query": query
+                })
+            )
+
+            response = await websocket.recv()
+
+            elapsed = (
+                time.perf_counter()
+                - start
+            )
+
+            data = json.loads(response)
+
+            print("=" * 60)
+            print("=" * 60)
+            print(f"Query {i + 1}: {query}")
+
+            print(
+                f"🌐 WebSocket total: "
+                f"{elapsed:.3f}s"
+            )
+
+            print(
+                "📦 Server response:"
+            )
+
+            print(data)
+            # print(f"Query {i + 1}: {query}")
+
+            # print(
+            #     f"🌐 WebSocket total: "
+            #     f"{elapsed:.3f}s"
+            # )
+
+            # print(
+            #     f"📚 Colab retrieval: "
+            #     f"{data['retrieval_time']:.3f}s"
+            # )
+
+            # print(
+            #     f"🔄 Colab reranking: "
+            #     f"{data['reranking_time']:.3f}s"
+            # )
+
+            # print(
+            #     f"⚡ Colab processing: "
+            #     f"{data['total_time']:.3f}s"
+            # )
+
+
+asyncio.run(test_websocket())

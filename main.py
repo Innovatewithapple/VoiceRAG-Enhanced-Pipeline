@@ -3,11 +3,13 @@ import sounddevice as sd
 import threading
 from models.nemotron import NemotronStreamer
 from models.tts import Generate_Speech
-from rag.remote_retrieval import Retrieve_Remote
+import rag.remote_retrieval as remote_retrieval
 from models.llm import Stream_LLM_To_TTS
 import time
 from audio.audio_state import audio_queue,tts_queue,query_metrics,conversation_history
 from audio.audio_workers import tts_worker,playback_worker
+import models.llm as llm
+from models.qwen_websocket import QwenWebSocketClient
 
 # =========================================================
 # MICROPHONE CALLBACK
@@ -89,10 +91,14 @@ def audio_worker():
 
                 retrieval_start = time.perf_counter()
 
-                top_chunk = Retrieve_Remote(final_query)
+                rag_response = remote_retrieval.Retrieve_Remote(final_query)
                 print("*"*50)
-                print(f"Recieved Chunk: {top_chunk}")
+                print(f"Recieved Chunk: {rag_response}")
                 print("*"*50)
+                if rag_response is None:
+                    top_chunk = None
+                else:
+                    top_chunk = rag_response["results"]
                 retrieval_time = (
                     time.perf_counter()
                     - retrieval_start
@@ -127,9 +133,13 @@ def audio_worker():
                     # =================================================
                     # LLM → STREAMING TTS
                     # =================================================
-
                     llm_start = time.perf_counter()
-                    
+
+                    print(
+                        f"🟣 ABOUT TO CALL QWEN: "
+                        f"{llm_start:.6f}",
+                        flush=True
+                    )
 
                     answer = Stream_LLM_To_TTS(
                         query=final_query,
@@ -137,6 +147,25 @@ def audio_worker():
                         tts_queue=tts_queue,
                         conversation_history=conversation_history
                     )
+
+                    llm_end = time.perf_counter()
+
+                    print(
+                        f"🟣 QWEN FUNCTION RETURNED: "
+                        f"{llm_end:.6f}",
+                        flush=True
+                    )
+
+                    print(
+                        f"🟣 MAIN → Stream_LLM_To_TTS: "
+                        f"{llm_end - llm_start:.3f}s",
+                        flush=True
+                    )
+
+                    # =================================================
+                    # CONVERSATION HISTORY
+                    # =================================================
+
                     conversation_history.append({
                         "role": "user",
                         "content": final_query
@@ -146,6 +175,10 @@ def audio_worker():
                         "role": "assistant",
                         "content": answer
                     })
+
+                    # =================================================
+                    # LLM METRIC
+                    # =================================================
 
                     llm_time = (
                         time.perf_counter()
@@ -188,6 +221,40 @@ greeting = Generate_Speech(
 
 sd.play(greeting,samplerate=24000)
 sd.wait()
+
+# ==========================================
+# START PERSISTENT QWEN WEBSOCKET
+# ==========================================
+
+print(
+    "🔌 Starting persistent Qwen WebSocket...",
+    flush=True
+)
+
+llm.qwen_client = QwenWebSocketClient()
+
+print(
+    "🟢 Persistent Qwen WebSocket ready.",
+    flush=True
+)
+
+# =========================================================
+# START PERSISTENT REMOTE RETRIEVAL WEBSOCKET
+# =========================================================
+
+print(
+    "🔌 Starting persistent Remote Retrieval WebSocket...",
+    flush=True
+)
+
+remote_retrieval.retrieval_client = (
+    remote_retrieval.RemoteRetrievalWebSocketClient()
+)
+
+print(
+    "🟢 Persistent Remote Retrieval WebSocket ready.",
+    flush=True
+)
 
 # ==========================================
 # START TTS WORKER
@@ -247,5 +314,26 @@ except KeyboardInterrupt:
 
     print(
         "\n🛑 Microphone stopped.",
+        flush=True
+    )
+
+    # ---------------------------------------------
+    # CLOSE QWEN
+    # ---------------------------------------------
+
+    if llm.qwen_client is not None:
+
+        llm.qwen_client.close()
+
+    # ---------------------------------------------
+    # CLOSE REMOTE RAG
+    # ---------------------------------------------
+
+    if remote_retrieval.retrieval_client is not None:
+
+        remote_retrieval.retrieval_client.close()
+
+    print(
+        "👋 VoiceRAG stopped.",
         flush=True
     )

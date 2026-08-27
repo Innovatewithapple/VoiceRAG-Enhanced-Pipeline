@@ -1,191 +1,149 @@
-import numpy as np
-import torch
+import asyncio
+import json
+import time
+import websockets
+from prompts.customer_support_agent import Customer_Support_Agent_Prompt
 
-from threading import Thread
-
-from transformers import (
-    AutoProcessor,
-    AutoModelForRNNT,
-    TextIteratorStreamer,
+QWEN_WS_URL = (
+    "wss://absentee-mulled-stadium.ngrok-free.dev/ws"
 )
 
-from transformers.audio_utils import load_audio
 
+async def test_qwen():
 
-MODEL_ID = "nvidia/nemotron-speech-streaming-en-0.6b"
+    async with websockets.connect(
+        QWEN_WS_URL,
+        ping_interval=20,
+        ping_timeout=60,
+        max_size=None
+    ) as ws:
 
-print("Loading processor...")
+        print("🟢 Connected to Qwen WebSocket\n")
 
-processor = AutoProcessor.from_pretrained(
-    MODEL_ID
-)
-
-print("Loading model...")
-
-model = AutoModelForRNNT.from_pretrained(
-    MODEL_ID
-)
-
-model.eval()
-
-# -----------------------------------------
-# Streaming configuration
-# -----------------------------------------
-
-processor.set_num_lookahead_tokens(6)
-
-print(
-    "Streaming latency:",
-    processor.streaming_latency_ms,
-    "ms"
-)
-
-sampling_rate = (
-    processor.feature_extractor.sampling_rate
-)
-
-# -----------------------------------------
-# Load recorded audio
-# -----------------------------------------
-
-audio = load_audio(
-    "/Users/himanshuvyas/VOICERAG/clean.wav",
-    sampling_rate=sampling_rate,
-)
-
-print(
-    "Audio:",
-    len(audio) / sampling_rate,
-    "seconds"
-)
-
-# -----------------------------------------
-# FIRST CHUNK
-# -----------------------------------------
-
-first_chunk_inputs = processor(
-    audio[
-        :processor.num_samples_first_audio_chunk
-    ],
-    sampling_rate=sampling_rate,
-    is_streaming=True,
-    is_first_audio_chunk=True,
-    return_tensors="pt",
-)
-
-first_chunk_inputs = first_chunk_inputs.to(
-    model.device,
-    dtype=model.dtype,
-)
-
-print(
-    "First chunk:",
-    processor.num_samples_first_audio_chunk,
-    "samples"
-)
-
-# -----------------------------------------
-# SUBSEQUENT CHUNKS
-# -----------------------------------------
-
-def input_features_generator():
-
-    yield (
-        first_chunk_inputs.input_features[
-            :,
-            :processor.num_mel_frames_first_audio_chunk,
-            :
+        queries = [
+            "Why can my application be cancelled?",
+            "Why can my application be cancelled?",
+            "Why can my application be cancelled?",
+            "Why can my application be cancelled?",
+            "Why can my application be cancelled?"
         ]
-    )
 
-    mel_frame_idx = (
-        processor.num_mel_frames_first_audio_chunk
-    )
+        for i, query in enumerate(queries):
 
-    hop_length = (
-        processor.feature_extractor.hop_length
-    )
+            # =========================================
+            # YOUR REAL PROMPT
+            # =========================================
 
-    n_fft = (
-        processor.feature_extractor.n_fft
-    )
+            prompt = Customer_Support_Agent_Prompt(
+                query=query,
+                context="""VisaFlow reserves the right to refuse or cancel an application in certain circumstances, including but not limited to the following:
 
-    start_idx = (
-        mel_frame_idx * hop_length
-        - n_fft // 2
-    )
+i) The applicant provides incorrect, incomplete or misleading information.
 
-    while True:
+ii) Required information or documents cannot be verified.
 
-        end_idx = (
-            start_idx
-            + processor.num_samples_per_audio_chunk
-        )
+VisaFlow may also refuse or cancel an application if fraudulent, unauthorized or illegal activity is suspected.
+""",
+                source="terms and policy",
+                conversation_history=[]
+            )
 
-        if end_idx >= len(audio):
-            break
+            payload = {
+                "model": 'Qwen3-30B-A3B-Q4_K_M.gguf',
 
-        inputs = processor(
-            audio[start_idx:end_idx],
-            sampling_rate=sampling_rate,
-            is_streaming=True,
-            is_first_audio_chunk=False,
-            return_tensors="pt",
-        )
+                "messages": prompt,
 
-        inputs = inputs.to(
-            model.device,
-            dtype=model.dtype,
-        )
+                "temperature": 0.7,
 
-        yield inputs.input_features
+                "max_tokens": 2048,
 
-        mel_frame_idx += (
-            processor.num_mel_frames_per_audio_chunk
-        )
+                "top_p": 0.8,
 
-        start_idx = (
-            mel_frame_idx * hop_length
-            - n_fft // 2
-        )
+                "stream": True,
+
+                "top_k": 20,
+
+                "min_p": 0,
+
+                "chat_template_kwargs": {
+                    "enable_thinking": False
+                }
+            }
+
+            # =========================================
+            # SEND
+            # =========================================
+
+            start = time.perf_counter()
+
+            await ws.send(
+                json.dumps(payload)
+            )
+
+            first_token = True
+            ttft = None
+            full_response = ""
+
+            # =========================================
+            # RECEIVE
+            # =========================================
+
+            while True:
+
+                message = await ws.recv()
+
+                data = json.loads(message)
+
+                if "error" in data:
+
+                    print(
+                        "❌ Error:",
+                        data["error"]
+                    )
+
+                    break
+
+                if "content" in data:
+
+                    if first_token:
+
+                        ttft = (
+                            time.perf_counter()
+                            - start
+                        )
+
+                        first_token = False
+
+                    text = data['content']
+                    print(
+                        text,
+                        end="",
+                        flush=True
+                    )
+
+                    full_response += data["content"]
+
+                if data.get("done"):
+
+                    total = (
+                        time.perf_counter()
+                        - start
+                    )
+                    print()
+
+                    break
+
+            print("=" * 60)
+            print(f"Query {i + 1}: {query}")
+            print(
+                f"🚀 TTFT: {ttft:.3f}s"
+            )
+            print(
+                f"🤖 Total: {total:.3f}s"
+            )
+
+        print("\n🔵 All queries finished.")
+        print("🔵 WebSocket connection will now close.")
 
 
-# -----------------------------------------
-# STREAMER
-# -----------------------------------------
-
-streamer = TextIteratorStreamer(
-    processor.tokenizer,
-    skip_special_tokens=True,
-)
-
-generate_kwargs = {
-    **first_chunk_inputs,
-    "input_features": input_features_generator(),
-    "streamer": streamer,
-    "max_new_tokens": 128,
-}
-
-print("\n🚀 Starting streaming inference...")
-print("-" * 60)
-
-thread = Thread(
-    target=model.generate,
-    kwargs=generate_kwargs,
-)
-
-thread.start()
-
-for text_chunk in streamer:
-
-    print(
-        text_chunk,
-        end="",
-        flush=True,
-    )
-
-thread.join()
-
-print("\n")
-print("-" * 60)
-print("✅ Streaming test finished")
+asyncio.run(test_qwen())
