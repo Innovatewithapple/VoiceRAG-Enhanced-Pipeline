@@ -105,6 +105,7 @@ class RemoteRetrievalWebSocketClient:
     async def _query_async(
         self,
         query,
+        conversation_history,
         output_queue
     ):
 
@@ -116,7 +117,8 @@ class RemoteRetrievalWebSocketClient:
 
             await self.websocket.send(
                 json.dumps({
-                    "query": query
+                    "query": query,
+                    "conversation_history": conversation_history
                 })
             )
 
@@ -210,7 +212,7 @@ class RemoteRetrievalWebSocketClient:
     # PUBLIC QUERY
     # =====================================================
 
-    def query(self, query):
+    def query(self, query, conversation_history):
 
         with self.request_lock:
 
@@ -226,6 +228,7 @@ class RemoteRetrievalWebSocketClient:
 
                 self._query_async(
                     query,
+                    conversation_history,
                     output_queue
                 ),
 
@@ -460,7 +463,10 @@ retrieval_client = None
 # PUBLIC FUNCTION
 # =========================================================
 
-def Retrieve_Remote(query):
+def Retrieve_Remote(
+    query,
+    conversation_history
+):
 
     global retrieval_client
 
@@ -471,5 +477,6 @@ def Retrieve_Remote(query):
         )
 
     return retrieval_client.query(
-        query
+        query=query,
+        conversation_history=conversation_history
     )

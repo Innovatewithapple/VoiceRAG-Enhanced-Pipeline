@@ -42,7 +42,7 @@ def tts_worker():
 
         audio = Generate_Speech(
             text=sentence,
-            voice="af_sky"
+            voice="am_michael"
         )
 
         tts_time = (

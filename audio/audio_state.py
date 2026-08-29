@@ -1,4 +1,5 @@
 import queue
+import threading
 
 
 # Microphone audio
@@ -12,5 +13,11 @@ tts_audio_queue = queue.Queue()
 
 # Current query metrics
 query_metrics = {}
+
+# Interrupt current playback
+tts_interrupt_event = threading.Event()
+
+# Whether TTS is currently playing
+tts_is_speaking = False
 
 conversation_history = []

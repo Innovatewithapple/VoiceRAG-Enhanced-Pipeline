@@ -177,10 +177,9 @@ def audio_worker():
 
         try:
 
-            result = (
-                remote_retrieval.Retrieve_Remote(
-                    final_query
-                )
+            result = remote_retrieval.Retrieve_Remote(
+                query=final_query,
+                conversation_history=conversation_history
             )
 
         except Exception as e:
@@ -376,11 +375,11 @@ def audio_worker():
 greeting = Generate_Speech(
 
     text=(
-        " Hi, I'm Sasha from VisaFlow. "
+        " Hi, I'm michael from VisaFlow. "
         "How may I help you?"
     ),
 
-    voice="af_sky"
+    voice="am_michael"
 )
 
 sd.play(
