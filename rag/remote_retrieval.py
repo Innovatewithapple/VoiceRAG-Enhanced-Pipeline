@@ -6,10 +6,8 @@ import time
 
 import websockets
 
+from audio.audio_state import tts_queue
 
-# =========================================================
-# COLAB RETRIEVAL + RERANKING WEBSOCKET
-# =========================================================
 
 COLAB_WS_URL = (
     "wss://plethora-registry-shrine.ngrok-free.dev/ws"
@@ -24,20 +22,18 @@ class RemoteRetrievalWebSocketClient:
 
         self.loop = None
         self.thread = None
+
         self.websocket = None
 
         self.connected = threading.Event()
         self.stopped = threading.Event()
 
-        # Only one RAG request at a time.
-        # This prevents responses from different queries
-        # from getting mixed together.
         self.request_lock = threading.Lock()
 
         self.start()
 
     # =====================================================
-    # START PERSISTENT EVENT LOOP
+    # START BACKGROUND ASYNCIO LOOP
     # =====================================================
 
     def start(self):
@@ -52,7 +48,7 @@ class RemoteRetrievalWebSocketClient:
         if not self.connected.wait(timeout=30):
 
             raise RuntimeError(
-                "❌ Remote Retrieval WebSocket connection timeout."
+                "❌ Retrieval WebSocket connection timeout."
             )
 
     # =====================================================
@@ -80,7 +76,7 @@ class RemoteRetrievalWebSocketClient:
     async def _connect(self):
 
         print(
-            "🔌 Connecting to Remote Retrieval WebSocket...",
+            "🔌 Connecting to Colab Retrieval WebSocket...",
             flush=True
         )
 
@@ -98,21 +94,25 @@ class RemoteRetrievalWebSocketClient:
         self.connected.set()
 
         print(
-            "🟢 Remote Retrieval WebSocket connected.",
+            "🟢 Colab Retrieval WebSocket connected.",
             flush=True
         )
 
     # =====================================================
-    # ONE REQUEST
+    # QUERY
     # =====================================================
 
-    async def _request_async(
+    async def _query_async(
         self,
         query,
         output_queue
     ):
 
         try:
+
+            # ---------------------------------------------
+            # SEND QUERY
+            # ---------------------------------------------
 
             await self.websocket.send(
                 json.dumps({
@@ -121,7 +121,7 @@ class RemoteRetrievalWebSocketClient:
             )
 
             # ---------------------------------------------
-            # Wait for Colab response
+            # RECEIVE STREAM
             # ---------------------------------------------
 
             while True:
@@ -130,41 +130,101 @@ class RemoteRetrievalWebSocketClient:
 
                 data = json.loads(message)
 
-                output_queue.put(data)
+                # =========================================
+                # DEBUG: WHAT EXACTLY CAME FROM COLAB?
+                # =========================================
 
-                # RAG server sends exactly one response
-                # for each query, so we can stop here.
-                break
+                print(
+                    f"📥 FROM COLAB: "
+                    f"type={data.get('type')} "
+                    f"chars={len(data.get('content', ''))}",
+                    flush=True
+                )
+
+                if data.get("type") == "sentence":
+
+                    print(
+                        f"📥 COLAB SENTENCE: "
+                        f"{data.get('content', '')}",
+                        flush=True
+                    )
+
+                # =========================================
+                # ERROR
+                # =========================================
+
+                if data.get("type") == "error":
+
+                    output_queue.put({
+                        "type": "error",
+                        "error": data.get("error")
+                    })
+
+                    return
+
+                # =========================================
+                # METADATA
+                # =========================================
+
+                if data.get("type") == "metadata":
+
+                    output_queue.put({
+                        "type": "metadata",
+                        "data": data
+                    })
+
+                # =========================================
+                # SENTENCE
+                # =========================================
+
+                elif data.get("type") == "sentence":
+
+                    output_queue.put({
+                        "type": "sentence",
+                        "content": data.get(
+                            "content",
+                            ""
+                        )
+                    })
+
+                # =========================================
+                # DONE
+                # =========================================
+
+                elif data.get("type") == "done":
+
+                    output_queue.put({
+                        "type": "done"
+                    })
+
+                    return
 
         except Exception as e:
 
             output_queue.put({
+                "type": "error",
                 "error": str(e)
             })
 
     # =====================================================
-    # REQUEST
+    # PUBLIC QUERY
     # =====================================================
 
-    def request(self, query):
+    def query(self, query):
 
         with self.request_lock:
 
             if not self.connected.is_set():
 
-                print(
-                    "⚠️ Remote Retrieval WebSocket "
-                    "is not connected.",
-                    flush=True
+                raise RuntimeError(
+                    "❌ Retrieval WebSocket is not connected."
                 )
-
-                return None
 
             output_queue = queue.Queue()
 
-            asyncio.run_coroutine_threadsafe(
+            future = asyncio.run_coroutine_threadsafe(
 
-                self._request_async(
+                self._query_async(
                     query,
                     output_queue
                 ),
@@ -172,19 +232,176 @@ class RemoteRetrievalWebSocketClient:
                 self.loop
             )
 
-            data = output_queue.get()
+            retrieval_time = None
+            reranking_time = None
+            rag_total = None
 
-            if "error" in data:
+            full_response = ""
 
-                print(
-                    f"⚠️ Remote retrieval WebSocket "
-                    f"error: {data['error']}",
-                    flush=True
+            request_start = (
+                time.perf_counter()
+            )
+            first_stream_time = None
+
+            while True:
+
+                item = output_queue.get()
+
+                item_type = item.get(
+                    "type"
                 )
 
-                return None
+                # =========================================
+                # ERROR
+                # =========================================
 
-            return data
+                if item_type == "error":
+
+                    # Make sure the coroutine has completed
+                    future.result()
+
+                    raise RuntimeError(
+                        item.get(
+                            "error",
+                            "Unknown WebSocket error"
+                        )
+                    )
+
+                # =========================================
+                # METADATA
+                # =========================================
+
+                if item_type == "metadata":
+
+                    metadata = item["data"]
+
+                    retrieval_time = metadata.get(
+                        "retrieval_time"
+                    )
+
+                    reranking_time = metadata.get(
+                        "reranking_time"
+                    )
+
+                    rag_total = metadata.get(
+                        "total_time"
+                    )
+
+                    print(
+                        f"📚 Retrieval: "
+                        f"{retrieval_time:.3f}s",
+                        flush=True
+                    )
+
+                    print(
+                        f"🔄 Reranking: "
+                        f"{reranking_time:.3f}s",
+                        flush=True
+                    )
+
+                    print(
+                        f"⚡ Colab RAG total: "
+                        f"{rag_total:.3f}s",
+                        flush=True
+                    )
+
+                # =========================================
+                # SENTENCE
+                # =========================================
+
+                elif item_type == "sentence":
+
+                    sentence = item.get(
+                        "content",
+                        ""
+                    )
+
+                    if sentence:
+
+                        full_response += (
+                            sentence + " "
+                        )
+
+                        # =========================================
+                        # FIRST STREAM → TTS
+                        # =========================================
+
+                        if first_stream_time is None:
+
+                            first_stream_time = (
+                                time.perf_counter()
+                                - request_start
+                            )
+
+                            print(
+                                f"🚀 First stream → TTS: "
+                                f"{first_stream_time:.3f}s",
+                                flush=True
+                            )
+
+                        # =================================
+                        # IMMEDIATELY SEND TO TTS
+                        # =================================
+
+                        print(
+                            f"🔊 Sentence → TTS: "
+                            f"{sentence}",
+                            flush=True
+                        )
+
+                        tts_queue.put(
+                            sentence
+                        )
+
+                # =========================================
+                # DONE
+                # =========================================
+
+                elif item_type == "done":
+
+                    break
+
+            # =============================================
+            # WAIT FOR COROUTINE TO FINISH
+            # =============================================
+
+            future.result()
+
+            # =============================================
+            # TELL TTS WORKER THIS QUERY IS COMPLETE
+            # =============================================
+
+            tts_queue.put(None)
+
+            total_time = (
+                time.perf_counter()
+                - request_start
+            )
+
+            print(
+                f"🌐 Remote Retrieval + Qwen: "
+                f"{total_time:.3f}s",
+                flush=True
+            )
+
+            return {
+
+                "answer":
+                    full_response.strip(),
+
+                "retrieval_time":
+                    retrieval_time,
+
+                "reranking_time":
+                    reranking_time,
+
+                "rag_total":
+                    rag_total,
+
+                "qwen_total":
+                    total_time
+
+            }
 
     # =====================================================
     # CLOSE
@@ -199,7 +416,7 @@ class RemoteRetrievalWebSocketClient:
         self.stopped.set()
 
         print(
-            "🔴 Closing Remote Retrieval WebSocket...",
+            "🔴 Closing Retrieval WebSocket...",
             flush=True
         )
 
@@ -227,13 +444,13 @@ class RemoteRetrievalWebSocketClient:
         self.connected.clear()
 
         print(
-            "🔴 Remote Retrieval WebSocket closed.",
+            "🔴 Retrieval WebSocket closed.",
             flush=True
         )
 
 
 # =========================================================
-# GLOBAL CLIENT
+# GLOBAL PERSISTENT CLIENT
 # =========================================================
 
 retrieval_client = None
@@ -243,79 +460,16 @@ retrieval_client = None
 # PUBLIC FUNCTION
 # =========================================================
 
-def Retrieve_Remote(
-    query,
-    timeout=30
-):
+def Retrieve_Remote(query):
+
+    global retrieval_client
 
     if retrieval_client is None:
 
-        print(
-            "❌ Remote Retrieval WebSocket client "
-            "has not been initialized.",
-            flush=True
+        retrieval_client = (
+            RemoteRetrievalWebSocketClient()
         )
 
-        return None
-
-    request_start = time.perf_counter()
-
-    try:
-
-        response = retrieval_client.request(
-            query
-        )
-
-        total_time = (
-            time.perf_counter()
-            - request_start
-        )
-
-        print(
-            f"🌐 Remote Retrieval WebSocket: "
-            f"{total_time:.3f}s",
-            flush=True
-        )
-
-        if response is None:
-
-            return None
-
-        # -------------------------------------------------
-        # Print timing returned by Colab
-        # -------------------------------------------------
-
-        if "retrieval_time" in response:
-
-            print(
-                f"📚 Retrieval: "
-                f"{response['retrieval_time']:.3f}s",
-                flush=True
-            )
-
-        if "reranking_time" in response:
-
-            print(
-                f"🔄 Reranking: "
-                f"{response['reranking_time']:.3f}s",
-                flush=True
-            )
-
-        if "total_time" in response:
-
-            print(
-                f"⚡ Colab RAG total: "
-                f"{response['total_time']:.3f}s",
-                flush=True
-            )
-
-        return response
-
-    except Exception as e:
-
-        print(
-            f"⚠️ Remote retrieval failed: {e}",
-            flush=True
-        )
-
-        return None
+    return retrieval_client.query(
+        query
+    )
