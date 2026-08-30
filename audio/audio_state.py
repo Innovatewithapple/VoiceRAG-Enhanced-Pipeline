@@ -14,10 +14,18 @@ tts_audio_queue = queue.Queue()
 # Current query metrics
 query_metrics = {}
 
-# Interrupt current playback
+# =========================================================
+# INTERRUPTION
+# =========================================================
+
+# Set when user starts speaking while TTS is playing.
 tts_interrupt_event = threading.Event()
 
-# Whether TTS is currently playing
-tts_is_speaking = False
+# Set while audio is actually being played.
+tts_speaking_event = threading.Event()
+
+# Every response gets a generation ID.
+# When interrupted, old audio becomes invalid.
+tts_generation_id = 0
 
 conversation_history = []

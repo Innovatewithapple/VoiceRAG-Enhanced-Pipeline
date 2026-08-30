@@ -1,4 +1,23 @@
-from Audio_Detection import (
+#---------Debug Print-----------!
+import warnings
+
+warnings.filterwarnings(
+    "ignore",
+    category=UserWarning,
+    module=r"torch\.nn\.modules\.rnn"
+)
+
+warnings.filterwarnings(
+    "ignore",
+    category=FutureWarning,
+    module=r"torch\.nn\.utils\.weight_norm"
+)
+
+from Testing.debug import setup_debug
+setup_debug()
+#-------------------------------!
+
+from audio.Audio_Detection import (
     Detect_Speech_And_Process_Audio,
     SAMPLE_RATE,
     CHANNELS,
@@ -8,6 +27,8 @@ from Audio_Detection import (
 import sounddevice as sd
 import threading
 import time
+import wave
+import numpy as np
 
 from models.nemotron import NemotronStreamer
 from models.tts import Generate_Speech
@@ -26,6 +47,13 @@ from audio.audio_workers import (
     playback_worker
 )
 
+# =========================================================
+# DEMO RECORDING
+# =========================================================
+
+RECORD_DEMO_AUDIO = True
+
+DEMO_GREETING_PATH = "demo_greeting.wav"
 
 # =========================================================
 # MICROPHONE CALLBACK
@@ -70,7 +98,6 @@ def audio_worker():
     while True:
 
         audio = audio_queue.get()
-
         utterance = Detect_Speech_And_Process_Audio(
             audio
         )
@@ -375,12 +402,32 @@ def audio_worker():
 greeting = Generate_Speech(
 
     text=(
-        " Hi, I'm michael from VisaFlow. "
+        " Hi, I'm Sarah from VisaFlow. "
         "How may I help you?"
     ),
 
-    voice="am_michael"
+    voice="af_sarah"
 )
+
+if RECORD_DEMO_AUDIO:
+
+    with wave.open(
+        "demo_greeting.wav",
+        "wb"
+    ) as demo_wav:
+
+        demo_wav.setnchannels(1)
+        demo_wav.setsampwidth(2)
+        demo_wav.setframerate(24000)
+
+        greeting_int16 = (
+            np.clip(greeting, -1.0, 1.0)
+            * 32767
+        ).astype(np.int16)
+
+        demo_wav.writeframes(
+            greeting_int16.tobytes()
+        )
 
 sd.play(
     greeting,

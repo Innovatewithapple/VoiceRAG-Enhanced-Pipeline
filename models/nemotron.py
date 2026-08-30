@@ -5,6 +5,10 @@ import threading
 
 import numpy as np
 import websocket
+from audio.audio_state import (
+    tts_speaking_event,
+    tts_interrupt_event
+)
 
 
 # =========================================================
@@ -196,6 +200,23 @@ class NemotronStreamer:
                 elif event_type== "input_audio_buffer.speech_started":
 
                     print("\n🎤 Nemotron speech started",flush=True)
+                    # =====================================================
+                    # INTERRUPT CURRENT TTS
+                    # =====================================================
+
+                    if tts_speaking_event.is_set():
+
+                        print(
+                            "🛑 User interrupted while TTS is speaking",
+                            flush=True
+                        )
+
+                        tts_interrupt_event.set()
+                    else:
+                        print(
+                            "ℹ️ NEMOTRON: TTS IS NOT SPEAKING",
+                            flush=True
+                        )
 
                 # =========================================
                 # SPEECH END
