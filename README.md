@@ -57,8 +57,6 @@ Streaming TTS
      ↓
 Audio Response
 `````
-Immediately after the introduction, put your **actual before/after results**.
-
 
 ## 🚀 Performance: Before vs After
 
