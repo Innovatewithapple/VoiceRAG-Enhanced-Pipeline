@@ -134,11 +134,6 @@ than waiting for the entire previous stage to finish.
 
 Current Status / What's Next
 
-**This is important because you told me the project is NOT finished.**
-
-Put this near the end:
-
-```markdown
 ## 🚧 Current Status
 
 VoiceRAG is an **active work-in-progress**.
