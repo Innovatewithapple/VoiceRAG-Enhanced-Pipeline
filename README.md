@@ -10,6 +10,26 @@ Augmented Generation, semantic reranking, Qwen3-30B, streaming Text-to-Speech,
 WebSockets, conversational memory, and real-time interruption handling into a
 low-latency voice interaction pipeline.
 
+<div align="center">
+
+<table>
+<tr>
+<td align="center">
+
+[YOUR-VIDEO-URL](https://github.com/user-attachments/assets/e340d36a-0457-4387-b60a-a1dd4e814761)
+
+</td>
+</tr>
+</table>
+
+<br>
+
+<sub>
+Speech → STT → Retrieval → Reranking → LLM → Streaming TTS → Audio
+</sub>
+
+</div>
+
 ## 🧠 What is VoiceRAG?
 
 VoiceRAG is designed to make a RAG-based customer-support system feel like a
