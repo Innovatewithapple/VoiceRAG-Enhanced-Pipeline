@@ -39,7 +39,7 @@ Audio Response
 `````
 Immediately after the introduction, put your **actual before/after results**.
 
-```markdown
+
 ## 🚀 Performance: Before vs After
 
 A major focus of VoiceRAG has been reducing the latency of real-time voice
