@@ -33,10 +33,7 @@ def tts_worker():
 
     if RECORD_DEMO_AUDIO:
 
-        demo_wav = wave.open(
-            DEMO_AUDIO_PATH,
-            "wb"
-        )
+        demo_wav = wave.open(DEMO_AUDIO_PATH,"wb")
 
         demo_wav.setnchannels(1)
         demo_wav.setsampwidth(2)
@@ -77,22 +74,36 @@ def tts_worker():
             flush=True
         )
 
+        # =========================================================
+        # TTS START
+        # =========================================================
+
         tts_start = time.perf_counter()
 
-        audio = Generate_Speech(
-            text=sentence,
-            voice="af_sarah"
-        )
+        # ---------------------------------------------------------
+        # FIRST TTS START FOR THIS QUERY
+        # ---------------------------------------------------------
 
+        if query_metrics["first_tts_start"] is None:
 
-        tts_time = (
-            time.perf_counter()
-            - tts_start
-        )
+            query_metrics["first_tts_start"] = tts_start
 
-        query_metrics[
-            "tts_generation_total"
-        ] += tts_time
+            print(
+                f"🧾 FIRST TTS START: "
+                f"{tts_start - query_metrics['query_start']:.3f}s "
+                f"from query start",
+                flush=True
+            )
+
+        # =========================================================
+        # KOKORO GENERATION
+        # =========================================================
+
+        audio = Generate_Speech(text=sentence,voice="af_sarah")
+
+        tts_time = (time.perf_counter() - tts_start)
+
+        query_metrics["tts_generation_total"] += tts_time
 
         print(
             f"🔊 TTS generation: "
@@ -104,9 +115,7 @@ def tts_worker():
         # Measure original silence
         # -----------------------------------------
 
-        leading, trailing = (
-            get_silence_duration(audio)
-        )
+        leading, trailing = (get_silence_duration(audio))
 
         print(
             f"🎧 Before trim: "
@@ -119,52 +128,30 @@ def tts_worker():
         # -----------------------------------------
         # Remove silence
         # -----------------------------------------
-
         audio = trim_silence(audio)
-        if (
-            RECORD_DEMO_AUDIO
-            and demo_wav is not None
-            and audio is not None
-        ):
 
-            audio_int16 = (
-                np.clip(audio, -1.0, 1.0)
-                * 32767
-            ).astype(np.int16)
+        if (RECORD_DEMO_AUDIO and demo_wav is not None and audio is not None):
 
-            demo_wav.writeframes(
-                audio_int16.tobytes()
-            )
+            audio_int16 = (np.clip(audio, -1.0, 1.0) * 32767).astype(np.int16)
+
+            demo_wav.writeframes(audio_int16.tobytes())
 
         if audio is None:
-
             print(
                 "⚠️ Skipping silent audio",
                 flush=True
             )
 
         else:
-
             print(
                 f"🎧 After trim: "
                 f"{len(audio) / 24000:.3f}s",
                 flush=True
             )
 
-            audio_duration = (
-                len(audio) / 24000
-            )
-
-            query_metrics[
-                "audio_duration"
-            ] += audio_duration
-
-            tts_audio_queue.put(
-                (
-                    generation_id,
-                    audio
-                )
-            )
+            audio_duration = (len(audio) / 24000)
+            query_metrics["audio_duration"] += audio_duration
+            tts_audio_queue.put((generation_id,audio))
 
         tts_queue.task_done()
 
@@ -209,18 +196,9 @@ def playback_worker():
 
                 tts_speaking_event.clear()
 
-                query_metrics[
-                    "last_audio_finished"
-                ] = time.perf_counter()
+                query_metrics["last_audio_finished"] = time.perf_counter()
 
-                response_total = (
-                    query_metrics[
-                        "last_audio_finished"
-                    ]
-                    - query_metrics[
-                        "query_start"
-                    ]
-                )
+                response_total = (query_metrics["last_audio_finished"] - query_metrics["query_start"])
 
                 print(
                     "\n" + "=" * 50,
@@ -244,17 +222,19 @@ def playback_worker():
                     flush=True
                 )
 
-                # if (
-                #     query_metrics[
-                #         "first_audio_started"
-                #     ] is not None
-                # ):
+                if (query_metrics["first_audio_started"] is not None):
+                    print(
+                        f"🚀 TTFA: "
+                        f"{query_metrics['first_audio_started'] - query_metrics['query_start']:.3f}s",
+                        flush=True
+                    )
+                if (query_metrics["tts_to_first_audio"] is not None):
 
-                #     print(
-                #         f"🚀 TTFA: "
-                #         f"{query_metrics['first_audio_started'] - query_metrics['query_start']:.3f}s",
-                #         flush=True
-                #     )
+                    print(
+                        f"🔥 TTS → First Audio: "
+                        f"{query_metrics['tts_to_first_audio']:.3f}s",
+                        flush=True
+                    )
 
                 print(
                     f"🔊 TTS compute: "
@@ -293,10 +273,7 @@ def playback_worker():
             # CHECK WHETHER AUDIO IS STALE
             # =================================================
 
-            if (
-                generation_id
-                != audio_state.tts_generation_id
-            ):
+            if (generation_id != audio_state.tts_generation_id):
 
                 print(
                     f"🗑️ Discarding stale TTS audio "
@@ -318,13 +295,9 @@ def playback_worker():
                 flush=True
             )
 
-            audio = np.asarray(
-                audio,
-                dtype=np.float32
-            )
+            audio = np.asarray(audio,dtype=np.float32)
 
             if audio.ndim == 1:
-
                 audio = audio.reshape(-1, 1)
 
             # =================================================
@@ -339,18 +312,28 @@ def playback_worker():
             )
 
             # =================================================
+            # TTS → FIRST AUDIO
+            # =================================================
+
+            if (query_metrics["first_tts_audio_started"] is None and query_metrics["first_tts_start"] is not None):
+
+                query_metrics["first_tts_audio_started"] = time.perf_counter()
+
+                query_metrics["tts_to_first_audio"] = (query_metrics["first_tts_audio_started"] - query_metrics["first_tts_start"])
+
+                print(
+                    f"🔥 TTS → FIRST AUDIO: "
+                    f"{query_metrics['tts_to_first_audio']:.3f}s",
+                    flush=True
+                )
+
+            # =================================================
             # TTFA
             # =================================================
 
-            if (
-                query_metrics[
-                    "first_audio_started"
-                ] is None
-            ):
+            if (query_metrics["first_audio_started"] is None):
 
-                query_metrics[
-                    "first_audio_started"
-                ] = time.perf_counter()
+                query_metrics["first_audio_started"] = time.perf_counter()
 
                 ttfa = (
                     query_metrics[
@@ -361,11 +344,11 @@ def playback_worker():
                     ]
                 )
 
-                # print(
-                #     f"🚀 TTFA: "
-                #     f"{ttfa:.3f} seconds",
-                #     flush=True
-                # )
+                print(
+                    f"🚀 TTFA: "
+                    f"{ttfa:.3f} seconds",
+                    flush=True
+                )
 
             # =================================================
             # PLAY AUDIO IN SMALL BLOCKS

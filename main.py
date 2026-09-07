@@ -147,6 +147,9 @@ def audio_worker():
             "tts_generation_total": 0.0,
 
             "audio_duration": 0.0,
+            "first_tts_start": None,
+            "first_tts_audio_started": None,
+            "tts_to_first_audio": None,
 
         })
 
@@ -398,7 +401,7 @@ def audio_worker():
 # =========================================================
 # BELLA GREETING
 # =========================================================
-
+print("Call start...")
 greeting = Generate_Speech(
 
     text=(
@@ -435,26 +438,6 @@ sd.play(
 )
 
 sd.wait()
-
-
-# =========================================================
-# START PERSISTENT REMOTE RETRIEVAL WEBSOCKET
-# =========================================================
-
-# print(
-#     "🔌 Starting persistent Remote Retrieval WebSocket...",
-#     flush=True
-# )
-
-# remote_retrieval.retrieval_client = (
-#     remote_retrieval.RemoteRetrievalWebSocketClient()
-# )
-
-# print(
-#     "🟢 Persistent Remote Retrieval WebSocket ready.",
-#     flush=True
-# )
-
 
 # =========================================================
 # START TTS WORKER

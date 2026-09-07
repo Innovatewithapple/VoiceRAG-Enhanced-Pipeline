@@ -32,13 +32,7 @@ def count_qwen_tokens(messages):
 
     return len(response.json()["tokens"])
 
-def Stream_LLM_To_TTS(
-    query,
-    context,
-    tts_queue,
-    conversation_history,
-    is_interruption=False
-):
+def Stream_LLM_To_TTS(query,context,tts_queue,conversation_history,is_interruption=False):
 
     # =========================================
     # SELECT PROMPT

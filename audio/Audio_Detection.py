@@ -163,3 +163,6 @@ def Detect_Speech_And_Process_Audio(audio):
 # vad_model()
 
 # So we were disturbing the state that VADIterator was supposed to maintain.
+
+#https://www.atlys.com/terms
+#https://www.atlys.com/privacy
